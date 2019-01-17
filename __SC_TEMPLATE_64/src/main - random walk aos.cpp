@@ -5,6 +5,8 @@
 
 SCDLLName("RANDOM WALK AOS")
 
+constexpr int seconds_per_day{ 86400 };
+
 unsigned int rn_generator(SCStudyInterfaceRef sc)
 {
 	std::mt19937 gen;
@@ -35,26 +37,29 @@ SCSFExport scsf_random_walk_aos(SCStudyInterfaceRef sc)
 	SCInputRef rth_start = sc.Input[1];
 	SCInputRef rth_finish = sc.Input[2];
 	SCInputRef flat_time = sc.Input[3];
+	SCInputRef trade_management = sc.Input[4];
+	SCInputRef ATR_multiplier = sc.Input[5];
 
 	if (sc.SetDefaults)
 	{
+
+		display_values.Name = "Display Values";
+		display_values.SetYesNo(1);
+
 		rth_start.Name = "Trade From:";
 		rth_start.SetTime(HMS_TIME(8, 30, 0));
 		rth_finish.Name = "Trade Till:";
 		rth_finish.SetTime(HMS_TIME(15, 00, 00));
 		flat_time.Name = "Flat At:";
 		flat_time.SetTime(HMS_TIME(15, 10, 00));
-	
-		display_values.Name = "Display Values";
-		display_values.SetYesNo(1);
 
-		sc.Subgraph[0].Name = "RTH start";
-		sc.Subgraph[0].DrawStyle = DRAWSTYLE_ARROW_UP;
-		sc.Subgraph[0].PrimaryColor = RGB(0, 255, 0);
-		sc.Subgraph[0].SecondaryColor = RGB(255, 0, 0);
-		sc.Subgraph[0].SecondaryColorUsed = 1;
-		sc.Subgraph[0].LineWidth = 10;
+		trade_management.Name = "Trade management";
+		trade_management.SetCustomInputStrings("Fixed; ATR Based;");
+		trade_management.SetCustomInputIndex(0);
 
+		ATR_multiplier.Name = "ATR Multiplier";
+		ATR_multiplier.SetFloat(5.0f);
+		
 		sc.Input[10].Name = "Random numbers range - min";
 		sc.Input[10].SetInt(10);
 		sc.Input[11].Name = "Random numbers range - max";
@@ -68,6 +73,7 @@ SCSFExport scsf_random_walk_aos(SCStudyInterfaceRef sc)
 
 		return;
 	}
+
 	sc.AllowMultipleEntriesInSameDirection = true;
 	sc.MaximumPositionAllowed = 1000;
 	sc.SupportReversals = false;
@@ -105,11 +111,24 @@ SCSFExport scsf_random_walk_aos(SCStudyInterfaceRef sc)
 	int starting_time = rth_start.GetTime(); // at first set the starting point to start RTH
 	if (cpv_already_traded != 0) { starting_time = last_exit_time; } // after each entry reset it to the timestamp of the last exit
 	int time_to_entry = x + starting_time;
-
+	
+	//set orders
 	s_SCNewOrder regular_order;
 	regular_order.OrderType = SCT_ORDERTYPE_MARKET;
 	regular_order.OrderQuantity = 1;
 
+	s_SCNewOrder ATR_order;
+	ATR_order.OrderType = SCT_ORDERTYPE_MARKET;
+	ATR_order.OrderQuantity = 1;
+
+	//compute ATR based sl and pt
+	SCSubgraphRef sg_ATR = sc.Subgraph[0];
+	sc.ATR(sc.BaseDataIn, sg_ATR, 10, MOVAVGTYPE_SIMPLE);
+	float ATR_value = sg_ATR[sc.Index];
+	ATR_order.Target1Offset = ATR_value * ATR_multiplier.GetFloat() * sc.TickSize;
+	ATR_order.Stop1Offset = ATR_value * ATR_multiplier.GetFloat() * sc.TickSize;
+		
+	//set position
 	s_SCPositionData current_position;
 	sc.GetTradePosition(current_position);
 	int position_qty{ static_cast<int>(current_position.PositionQuantity) };
@@ -118,20 +137,32 @@ SCSFExport scsf_random_walk_aos(SCStudyInterfaceRef sc)
 	{
 		if (curent_time >= time_to_entry && ls == 1)
 		{
-			int check_entry = static_cast<int>(sc.BuyEntry(regular_order));
+			switch (trade_management.GetIndex())
+			{
+				case 0: sc.BuyEntry(regular_order);
+					break;
+				case 1: sc.BuyEntry(ATR_order);
+					break;
+			}
 			if (position_qty != 0)
 			{
 				cpv_previous_qty = 1; 
-				x = 86400; //86400 is the number of seconds within one day, set this high number to avoid reentry in case the trade would take really long (no trade till take longer than one day)
+				x = seconds_per_day; //to avoid reentry in case the trade would take really long (no trade till take longer than one day)
 			}
 		}
 		else if (curent_time >= time_to_entry && ls == 0)
 		{
-			int check_entry = static_cast<int>(sc.SellEntry(regular_order));
+			switch (trade_management.GetIndex())
+			{
+				case 0:	sc.BuyEntry(regular_order);
+					break;
+				case 1:	sc.BuyEntry(ATR_order);
+					break;
+			}
 			if (position_qty != 0)
 			{
 				cpv_previous_qty = 1;
-				x = 86400; 
+				x = seconds_per_day;
 			}
 		}
 		// after closing a possition
@@ -140,15 +171,32 @@ SCSFExport scsf_random_walk_aos(SCStudyInterfaceRef sc)
 				last_exit_dt_perzist = current_position.LastExitDateTime;  
 				cpv_already_traded = 1;
 				cpv_previous_qty = 0;
-				cpv_already_generated = 0; //set the control perzist vars to 0 to re-generate random number
+				cpv_already_generated = 0; //reset the control perzist var to re-generate random number
 		}
 	}
 	
-	if (current_position.PositionQuantity != 0 && sc.BaseDateTimeIn[sc.Index].GetTime() >= flat_time.GetTime()) sc.FlattenAndCancelAllOrders();
+	if (current_position.PositionQuantity != 0 && sc.BaseDateTimeIn[sc.Index].GetTime() >= flat_time.GetTime()) 
+		sc.FlattenAndCancelAllOrders();
 
 	if (display_values.GetYesNo() == TRUE)
 	{
 		{
+			s_UseTool atr;
+			atr.Clear();
+			atr.ChartNumber = sc.ChartNumber;
+			atr.DrawingType = DRAWING_TEXT;
+			atr.FontSize = 10;
+			atr.FontBold = false;
+			atr.AddMethod = UTAM_ADD_OR_ADJUST;
+			atr.UseRelativeVerticalValues = 1;
+			atr.BeginDateTime = 4;
+			atr.BeginValue = 87;
+			atr.Color = RGB(255, 255, 255);
+			atr.Region = 0;
+			atr.Text.Format("ATR: %3.2f", ATR_value);
+			atr.LineNumber = 22;
+			sc.UseTool(atr);
+		} {
 			s_UseTool t;
 			t.Clear();
 			t.ChartNumber = sc.ChartNumber;
@@ -246,5 +294,4 @@ SCSFExport scsf_random_walk_aos(SCStudyInterfaceRef sc)
 			sc.UseTool(t);
 		}
 	}
-
 }
