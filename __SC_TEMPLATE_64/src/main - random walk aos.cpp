@@ -3,7 +3,7 @@
 #include<chrono>
 #include<string>
 
-SCDLLName("RANDOM WALK AOS")
+SCDLLName("RANDOM WALK AOS2107")
 
 constexpr int seconds_per_day{ 86400 };
 
@@ -65,7 +65,7 @@ SCSFExport scsf_random_walk_aos(SCStudyInterfaceRef sc)
 		sc.Input[11].Name = "Random numbers range - max";
 		sc.Input[11].SetInt(3600);
 
-		sc.GraphName = "Randow walk AOS";
+		sc.GraphName = "Randow walk AOS 2017";
 		sc.AutoLoop = 1;
 		sc.GraphRegion = 0;
 		sc.UpdateAlways = 1;
@@ -175,8 +175,9 @@ SCSFExport scsf_random_walk_aos(SCStudyInterfaceRef sc)
 		}
 	}
 	
-	if (current_position.PositionQuantity != 0 && sc.BaseDateTimeIn[sc.Index].GetTime() >= flat_time.GetTime()) 
-		sc.FlattenAndCancelAllOrders();
+	if (current_position.PositionQuantity != 0 && sc.BaseDateTimeIn[sc.Index].GetTime() >= flat_time.GetTime()) sc.FlattenAndCancelAllOrders();
+
+	if (curent_time == 0) sc.ClearAllPersistentData(); 
 
 	if (display_values.GetYesNo() == TRUE)
 	{
