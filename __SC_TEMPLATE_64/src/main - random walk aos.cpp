@@ -154,9 +154,9 @@ SCSFExport scsf_random_walk_aos(SCStudyInterfaceRef sc)
 		{
 			switch (trade_management.GetIndex())
 			{
-				case 0:	sc.BuyEntry(regular_order);
+				case 0:	sc.SellEntry(regular_order);
 					break;
-				case 1:	sc.BuyEntry(ATR_order);
+				case 1:	sc.SellEntry(ATR_order);
 					break;
 			}
 			if (position_qty != 0)
